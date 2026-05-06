@@ -1,0 +1,155 @@
+# render.yaml — Hermes Agent deployment on Render
+# https://render.com/docs/blueprint-spec
+#
+# Deploy via:
+#   1. Push this repo to GitHub / GitLab
+#   2. In Render dashboard → "New Blueprint" → connect repo
+#   3. Set the required secret env vars in the Render UI (marked sync:false)
+#   4. Click "Apply"
+#
+# The service uses the existing Dockerfile at the repo root.
+# All persistent state (config, sessions, memories, API keys) lives on
+# the managed disk mounted at /opt/data.  The disk survives deploys and
+# restarts; the container itself is stateless.
+#
+# TELEGRAM SETUP (required for the gateway to be useful):
+#   1. Talk to @BotFather on Telegram → /newbot → copy the token
+#   2. Set TELEGRAM_BOT_TOKEN in the Render environment variables
+#   3. Optionally set TELEGRAM_ALLOWED_USERS to your numeric Telegram user ID
+#      (find it via @userinfobot) — leave unset to allow all users (open bot)
+#   4. After first deploy, the bot will start accepting messages automatically
+#      using long-polling (no webhook configuration required)
+#
+# WEBHOOK MODE (optional — more responsive, lower Render CPU):
+#   Uncomment TELEGRAM_WEBHOOK_URL and TELEGRAM_WEBHOOK_SECRET below, set
+#   them to your Render service URL.  The gateway will register the webhook
+#   automatically on startup.  The API server (port 8642) must be enabled
+#   (already set below) so Render's health check passes independently.
+
+services:
+  - type: web
+    name: hermes-gateway
+    env: docker
+
+    # Build from the Dockerfile in the repo root.
+    dockerfilePath: ./Dockerfile
+
+    # Render instance plan.  Hermes needs ≥1 GB RAM; "standard" (2 GB) is
+    # recommended.  Playwright/Chromium tools need ≥2 GB ("standard" or above).
+    # "starter" (512 MB) will OOM on anything heavier than pure LLM chat.
+    plan: standard
+
+    # The API server listens on 8642 inside the container.
+    # Render terminates TLS externally and forwards HTTP to this port.
+    port: 8642
+
+    # Health check — the API server exposes GET /health.
+    # Render will mark the deploy healthy once this returns 200.
+    healthCheckPath: /health
+
+    # Render wraps startCommand strings in `/bin/sh -c "..."` before passing
+    # them to Docker.  The entrypoint.sh detects that /bin/sh is an executable
+    # and exec's it directly, bypassing the `exec hermes "$@"` fallback.
+    # Using the full venv path to `hermes` ensures the correct binary is found
+    # regardless of whether the command arrives shell-wrapped or as exec-form.
+    startCommand: /opt/hermes/.venv/bin/hermes gateway run
+
+    # Persistent managed disk.  All Hermes state lives here: .env, config.yaml,
+    # sessions/, memories/, skills/, logs/, etc.
+    # The disk survives deploys, rollbacks, and container restarts.
+    disk:
+      name: hermes-data
+      mountPath: /opt/data
+      sizeGB: 10
+
+    envVars:
+      # ── Non-interactive gateway runtime ──────────────────────────────────
+      # Auto-accept shell hooks so the gateway doesn't block waiting for a TTY.
+      - key: HERMES_ACCEPT_HOOKS
+        value: "1"
+
+      # Python log flushing (already set in Dockerfile; kept here for clarity).
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+      # ── API server (health check + optional external access) ──────────────
+      # Enable the built-in OpenAI-compatible API server on port 8642.
+      # Required for Render's health check to pass.
+      - key: API_SERVER_ENABLED
+        value: "true"
+
+      # Bind to all interfaces inside the container so Render can reach it.
+      - key: API_SERVER_HOST
+        value: "0.0.0.0"
+
+      # API key for the server — required when HOST is not 127.0.0.1.
+      # Generate one with: openssl rand -hex 32
+      # Set this as a secret in the Render dashboard (never hard-code it here).
+      - key: API_SERVER_KEY
+        sync: false
+
+      # ── LLM provider (set at least one) ──────────────────────────────────
+      # OpenRouter — single key for 100+ models (recommended for cloud deploys)
+      # Get yours at https://openrouter.ai/keys
+      - key: OPENROUTER_API_KEY
+        sync: false
+
+      # Anthropic direct (optional alternative / fallback)
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # OpenAI direct (optional alternative / fallback)
+      - key: OPENAI_API_KEY
+        sync: false
+
+      # Google AI Studio / Gemini (optional)
+      - key: GOOGLE_API_KEY
+        sync: false
+
+      # ── Telegram gateway ─────────────────────────────────────────────────
+      # Required: bot token from @BotFather
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+
+      # Recommended: comma-separated numeric Telegram user IDs allowed to use the bot.
+      # Leave unset to allow all users (open bot — not recommended for private use).
+      - key: TELEGRAM_ALLOWED_USERS
+        sync: false
+
+      # Optional: default chat for cron job delivery
+      - key: TELEGRAM_HOME_CHANNEL
+        sync: false
+
+      # ── Webhook mode (optional — uncomment to enable) ────────────────────
+      # When set, the gateway registers a Telegram webhook instead of polling.
+      # Replace <your-service-name> with your actual Render service name.
+      #
+      # - key: TELEGRAM_WEBHOOK_URL
+      #   value: "https://<your-service-name>.onrender.com/telegram"
+      #
+      # Webhook secret — generate with: openssl rand -hex 32
+      # - key: TELEGRAM_WEBHOOK_SECRET
+      #   sync: false
+
+      # ── Optional tool API keys ───────────────────────────────────────────
+      # Web search (Exa)
+      - key: EXA_API_KEY
+        sync: false
+
+      # Web scraping (Firecrawl)
+      - key: FIRECRAWL_API_KEY
+        sync: false
+
+      # Image generation (fal.ai)
+      - key: FAL_KEY
+        sync: false
+
+      # Voice transcription (Groq — free tier)
+      - key: GROQ_API_KEY
+        sync: false
+
+      # ── Hermes home directory ────────────────────────────────────────────
+      # Points to the persistent disk mount.  The Dockerfile already sets
+      # this to /opt/data; listed here in case an override is ever needed.
+      - key: HERMES_HOME
+        value: "/opt/data"
