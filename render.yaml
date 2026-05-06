@@ -40,9 +40,6 @@ services:
     plan: standard
 
     # The API server listens on 8642 inside the container.
-    # Render terminates TLS externally and forwards HTTP to this port.
-    port: 8642
-
     # Health check — the API server exposes GET /health.
     # Render will mark the deploy healthy once this returns 200.
     healthCheckPath: /health
@@ -63,6 +60,11 @@ services:
       sizeGB: 10
 
     envVars:
+      # Render's Blueprint schema expects the runtime port via PORT.
+      # Hermes' API server listens on 8642 (DEFAULT_PORT in gateway API server).
+      - key: PORT
+        value: "8642"
+
       # ── Non-interactive gateway runtime ──────────────────────────────────
       # Auto-accept shell hooks so the gateway doesn't block waiting for a TTY.
       - key: HERMES_ACCEPT_HOOKS
