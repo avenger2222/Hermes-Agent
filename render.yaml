@@ -29,7 +29,7 @@
 services:
   - type: web
     name: hermes-gateway
-    env: docker
+    runtime: docker
 
     # Build from the Dockerfile in the repo root.
     dockerfilePath: ./Dockerfile
@@ -44,12 +44,9 @@ services:
     # Render will mark the deploy healthy once this returns 200.
     healthCheckPath: /health
 
-    # Render wraps startCommand strings in `/bin/sh -c "..."` before passing
-    # them to Docker.  The entrypoint.sh detects that /bin/sh is an executable
-    # and exec's it directly, bypassing the `exec hermes "$@"` fallback.
-    # Using the full venv path to `hermes` ensures the correct binary is found
-    # regardless of whether the command arrives shell-wrapped or as exec-form.
-    startCommand: /opt/hermes/.venv/bin/hermes gateway run
+    # Command to run in the container (overrides Dockerfile CMD).
+    # The Dockerfile ENTRYPOINT remains in effect (tini + docker/entrypoint.sh).
+    dockerCommand: gateway run
 
     # Persistent managed disk.  All Hermes state lives here: .env, config.yaml,
     # sessions/, memories/, skills/, logs/, etc.
